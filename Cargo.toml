@@ -1,5 +1,5 @@
 [package]
-name = "comic-doc"
+name = "cdoc"
 version = "0.1.0"
 edition = "2021"
 

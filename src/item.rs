@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     ffi::OsStr,
     fs, io,
     path::{Path, PathBuf},
@@ -53,7 +54,12 @@ impl PathMetaSource for fs::DirEntry {
 fn create_tarball(context: &ProcessingContext, path: &Path) -> io::Result<()> {
     let mut archive = Builder::new(Vec::new());
 
-    populate_archive(path, &mut archive)?;
+    // "Relative path" is used to track directories within the archive, so we
+    // start with a blank directory.
+    let has_content = populate_archive(path, Path::new(path.file_name().unwrap()), &mut archive)?;
+    if !has_content {
+        return Ok(());
+    }
 
     let path = context.output_path(path);
     if path.exists() && !context.force {
@@ -76,43 +82,87 @@ fn repair_tarball(context: &ProcessingContext, path: &Path) -> io::Result<()> {
 //
 // SPECIFICALLY: webp subdirectories will NOT incur recursion, because the
 // contents of those will be archived IN LIEU of the contents of the parent.
-fn populate_archive<T>(path: &Path, archive: &mut Builder<T>) -> io::Result<()>
+
+fn populate_archive<T>(
+    path: &Path,
+    relative_path: &Path,
+    archive: &mut Builder<T>,
+) -> io::Result<bool>
 where
     T: io::Write,
 {
     let (files, directories) = read_level(path)?;
 
+    if files.is_empty() && directories.is_empty() {
+        return Ok(false);
+    }
+
     // If we have a webp subdirectory, we're probably going to completely
     // ignore these files.
 
     if let Some(webp) = get_webp_dir(&directories) {
-        let files = fs::read_dir(&webp.path)?.filter_map(|entry| {
+        // What the code below does is that it appends files under webp as if
+        // they were contained in the working directory. What we need to do
+        // instead is combine those files with png files found in the working
+        // directory, preferring the webp files.
+
+        // E.g., if the files foo.png and foo.webp are found, take foo.webp,
+        // because it's the original. If, on the other hand, files bar.png
+        // and baz.webp are found, take both files. This is because the pnk
+        // process did not create png duplicates of non-webp files.
+
+        let webp_files = fs::read_dir(&webp.path)?.filter_map(|entry| {
             let entry = entry.ok()?;
             entry.file_type().ok()?.is_file().then(|| entry.path())
         });
-        append_files(archive, files)?;
-        return Ok(());
+
+        let webp_files: HashMap<_, _> = webp_files
+            .filter_map(|file| {
+                let name = file.file_stem().map(|name| name.to_owned());
+                name.map(|name| (name, file))
+            })
+            .collect();
+
+        let combined_files = files.into_iter().filter_map(|primary| {
+            let name = primary.path.file_stem()?;
+            let backup = webp_files.get(name).cloned();
+            Some(backup.unwrap_or(primary.path))
+        });
+
+        append_files(archive, relative_path, combined_files)?;
+    } else {
+        append_files(
+            archive,
+            relative_path,
+            files.into_iter().map(|meta| meta.path),
+        )?;
     }
 
-    // We apparently DON'T have a webp directory, so we're going to continue.
+    // Do not descend into webp subdirectories
+    let webp = Path::new("webp");
+    let filtered_directories = directories
+        .into_iter()
+        .filter(|dir| !dir.path.ends_with(webp));
 
-    append_files(archive, files.into_iter().map(|meta| meta.path))?;
-
-    for dir in directories {
-        populate_archive(&dir.path, archive)?;
+    for dir in filtered_directories {
+        populate_archive(
+            &dir.path,
+            &relative_path.join(dir.path.file_name().unwrap()),
+            archive,
+        )?;
     }
 
-    Ok(())
+    Ok(true)
 }
 
-fn append_files<T, I>(archive: &mut Builder<T>, files: I) -> io::Result<()>
+fn append_files<T, I>(archive: &mut Builder<T>, relative_path: &Path, files: I) -> io::Result<()>
 where
     T: io::Write,
     I: IntoIterator<Item = PathBuf>,
 {
     for path in files {
         let mut file = fs::File::open(&path)?;
-        archive.append_file(path.file_name().unwrap(), &mut file)?;
+        archive.append_file(relative_path.join(path.file_name().unwrap()), &mut file)?;
     }
     Ok(())
 }

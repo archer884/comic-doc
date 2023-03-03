@@ -7,6 +7,7 @@ use crate::item::Item;
 #[derive(Debug, Parser)]
 pub struct Args {
     /// input file paths
+    #[arg(required = true)]
     paths: Vec<String>,
 
     /// output directory
