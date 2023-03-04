@@ -68,7 +68,11 @@ pub fn repair_tarball(context: &ProcessingContext, path: &Path) -> io::Result<()
 
     for dir in a_dirs {
         let candidate_b_dir = dir.join("webp");
-        let a_files = entries.get(dir).unwrap();
+        let a_files = match entries.get(dir) {
+            Some(a_files) => a_files,
+            None => continue,
+        };
+
         let b_files = entries
             .get(&candidate_b_dir)
             .map(|b_files| {
