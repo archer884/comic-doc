@@ -2,6 +2,7 @@ use std::{io, process};
 
 mod args;
 mod item;
+mod processor;
 
 use args::Args;
 
@@ -14,10 +15,5 @@ fn main() {
 
 fn run(args: &Args) -> io::Result<()> {
     let context = args.as_processing_context();
-
-    for item in args.items() {
-        item.process(&context)?;
-    }
-
-    Ok(())
+    args.items().try_for_each(|item| item.process(&context))
 }

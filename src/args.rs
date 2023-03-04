@@ -60,17 +60,24 @@ pub struct ProcessingContext<'a> {
 
 impl ProcessingContext<'_> {
     pub fn output_path(&self, path: &Path) -> PathBuf {
-        // Some asshole sent us a file.
-        if !path.is_dir() {
-            panic!("can't derive output path for non-directory");
-        }
-
         match self.target {
             Some(target) => {
-                let name = path.file_name().expect("must not be root directory");
-                Path::new(target).join(name).with_extension("cbz")
+                if path.ends_with("cbz") {
+                    let base = Path::new(target);
+                    let name = path.file_name().expect("must not be root directory");
+                    base.join(name)
+                } else {
+                    let name = path.file_name().expect("must not be root directory");
+                    Path::new(target).join(name).with_extension("cbz")
+                }
             }
-            None => path.with_extension("cbz"),
+            None => {
+                if path.ends_with("cbz") {
+                    path.into()
+                } else {
+                    path.with_extension("cbz")
+                }
+            }
         }
     }
 }

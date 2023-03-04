@@ -10,4 +10,5 @@ lto = "thin"
 
 [dependencies]
 clap = { version = "4.1.8", features = ["derive", "wrap_help"] }
+hashbrown = "0.13.2"
 tar = "0.4.38"
